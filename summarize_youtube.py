@@ -9,13 +9,16 @@ Usage:
     python summarize_youtube.py <video_id>              # Use Ollama (default)
     python summarize_youtube.py <video_id> --openai    # Use OpenAI API
     python summarize_youtube.py <video_id> --ollama    # Use Ollama explicitly
+    python summarize_youtube.py <video_id> --html      # Generate HTML and open in browser
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import webbrowser
 from pathlib import Path
 
 import ollama
@@ -368,6 +371,210 @@ def summarize_with_openai(text: str, model: str = "gpt-4o-mini") -> str:
         sys.exit(1)
 
 
+def get_video_metadata(video_id: str) -> dict:
+    """
+    Get video metadata using yt-dlp.
+
+    Args:
+        video_id: YouTube video ID
+
+    Returns:
+        Dictionary with title, channel, thumbnail, duration
+    """
+    cmd = [
+        "yt-dlp",
+        "--impersonate", "chrome",
+        "--dump-json",
+        "--skip-download",
+        video_id
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        try:
+            data = json.loads(result.stdout)
+            return {
+                "title": data.get("title", "Unknown Title"),
+                "channel": data.get("channel", data.get("uploader", "Unknown Channel")),
+                "thumbnail": data.get("thumbnail", ""),
+                "duration": data.get("duration_string", ""),
+                "url": f"https://www.youtube.com/watch?v={video_id}"
+            }
+        except json.JSONDecodeError:
+            pass
+
+    return {
+        "title": "Unknown Title",
+        "channel": "Unknown Channel",
+        "thumbnail": "",
+        "duration": "",
+        "url": f"https://www.youtube.com/watch?v={video_id}"
+    }
+
+
+def generate_html(video_id: str, summary: str, metadata: dict) -> str:
+    """
+    Generate HTML file with video summary.
+
+    Args:
+        video_id: YouTube video ID
+        summary: Summary text
+        metadata: Video metadata
+
+    Returns:
+        Path to generated HTML file
+    """
+    # Convert summary to HTML paragraphs
+    summary_html = ""
+    for line in summary.split("\n"):
+        line = line.strip()
+        if line:
+            # Convert **bold** to <strong>bold</strong>
+            line = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', line)
+
+            # Handle numbered lists
+            if re.match(r'^\d+\.', line):
+                summary_html += f"<p class='list-item'>{line}</p>\n"
+            # Handle bullet points
+            elif line.startswith(('- ', '* ', '• ')):
+                summary_html += f"<p class='bullet'>{line}</p>\n"
+            else:
+                summary_html += f"<p>{line}</p>\n"
+
+    html_content = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Summary: {metadata["title"]}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }}
+        .video-header {{
+            position: relative;
+            background: #000;
+        }}
+        .thumbnail {{
+            width: 100%;
+            height: auto;
+            display: block;
+            opacity: 0.8;
+        }}
+        .video-info {{
+            padding: 24px;
+            background: linear-gradient(to bottom, #1a1a2e, #16213e);
+            color: white;
+        }}
+        .video-title {{
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }}
+        .video-meta {{
+            display: flex;
+            gap: 16px;
+            color: #aaa;
+            font-size: 0.9rem;
+        }}
+        .video-meta a {{
+            color: #667eea;
+            text-decoration: none;
+        }}
+        .video-meta a:hover {{
+            text-decoration: underline;
+        }}
+        .summary-section {{
+            padding: 32px;
+        }}
+        .summary-header {{
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #eee;
+        }}
+        .summary-content p {{
+            margin-bottom: 12px;
+            text-align: justify;
+        }}
+        .summary-content h3 {{
+            margin: 20px 0 12px 0;
+            color: #444;
+            font-size: 1.1rem;
+        }}
+        .summary-content .list-item {{
+            padding-left: 8px;
+        }}
+        .summary-content .bullet {{
+            padding-left: 20px;
+        }}
+        .footer {{
+            padding: 20px 32px;
+            background: #f8f9fa;
+            text-align: center;
+            color: #666;
+            font-size: 0.85rem;
+        }}
+        .footer a {{
+            color: #667eea;
+            text-decoration: none;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-header">
+            <img class="thumbnail" src="{metadata["thumbnail"]}" alt="Video thumbnail">
+        </div>
+        <div class="video-info">
+            <h1 class="video-title">{metadata["title"]}</h1>
+            <div class="video-meta">
+                <span>{metadata["channel"]}</span>
+                <span>{metadata["duration"]}</span>
+                <a href="{metadata["url"]}" target="_blank">Watch on YouTube</a>
+            </div>
+        </div>
+        <div class="summary-section">
+            <h2 class="summary-header">Summary</h2>
+            <div class="summary-content">
+                {summary_html}
+            </div>
+        </div>
+        <div class="footer">
+            Generated by <a href="https://github.com/anthropics/claude-code">YouTube Summarizer</a>
+        </div>
+    </div>
+</body>
+</html>'''
+
+    html_file = f"{video_id}_summary.html"
+    with open(html_file, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+    return html_file
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Download YouTube subtitles and generate summary"
@@ -376,6 +583,7 @@ def main():
     parser.add_argument("--openai", action="store_true", help="Use OpenAI API for summarization")
     parser.add_argument("--ollama", action="store_true", help="Use Ollama for summarization (default)")
     parser.add_argument("--model", help="Model to use (default: gpt-4o-mini for OpenAI, qwen2.5:7b for Ollama)")
+    parser.add_argument("--html", action="store_true", help="Generate HTML output and open in browser")
 
     args = parser.parse_args()
 
@@ -422,6 +630,16 @@ def main():
     with open(summary_file, 'w', encoding='utf-8') as f:
         f.write(summary)
     print(f"✓ Summary saved: {summary_file}")
+
+    # Generate HTML and open in browser if requested
+    if args.html:
+        print()
+        print("Generating HTML output...")
+        metadata = get_video_metadata(video_id)
+        html_file = generate_html(video_id, summary, metadata)
+        print(f"✓ HTML saved: {html_file}")
+        print("Opening in browser...")
+        webbrowser.open(f"file://{os.path.abspath(html_file)}")
 
 
 if __name__ == "__main__":

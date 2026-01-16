@@ -9,6 +9,7 @@ venv/
 *.en.txt
 *.en-US.txt
 *_summary.txt
+*_summary.html
 
 # Claude Code
 .claude/
