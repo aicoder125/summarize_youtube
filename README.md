@@ -9,6 +9,9 @@ A Python tool that downloads YouTube video subtitles and generates summaries usi
 - Summarizes content using:
   - **Ollama** (local, free) - default option
   - **OpenAI API** (cloud-based, requires API key)
+- **Two interfaces:**
+  - **Command-line** - Run from terminal
+  - **Web app** - Browser-based UI with beautiful HTML output
 
 ## Prerequisites
 
@@ -97,7 +100,24 @@ If you want to use Ollama (default):
 
 ## Usage
 
-### Basic usage (with Ollama - default)
+### Option 1: Web App (Recommended)
+
+The easiest way to use the summarizer is through the web interface:
+
+```bash
+source venv/bin/activate
+python app.py
+```
+
+Then open **http://localhost:5001** in your browser. You'll see a simple form where you can:
+1. Paste a YouTube URL or video ID
+2. Choose between Ollama (local) or OpenAI
+3. Click "Summarize"
+4. View the beautifully formatted result in a new tab
+
+### Option 2: Command Line
+
+#### Basic usage (with Ollama - default)
 
 ```bash
 python summarize_youtube.py <video_id_or_url>
@@ -112,13 +132,21 @@ python summarize_youtube.py dQw4w9WgXcQ
 python summarize_youtube.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
-### Using OpenAI API
+#### With HTML output (opens in browser)
+
+```bash
+python summarize_youtube.py <video_id_or_url> --html
+```
+
+This generates a styled HTML page with video thumbnail, title, and formatted summary, then opens it in your browser.
+
+#### Using OpenAI API
 
 ```bash
 python summarize_youtube.py <video_id_or_url> --openai
 ```
 
-### Using a specific model
+#### Using a specific model
 
 ```bash
 # With Ollama
@@ -179,6 +207,8 @@ See `requirements.txt` for the full list of Python dependencies:
 - `ollama` - Local LLM client
 - `python-dotenv` - Environment variable management
 - `openai` - OpenAI API client
+- `flask` - Web app framework
+- `curl-cffi` - Browser impersonation for yt-dlp
 
 ## License
 
