@@ -1,0 +1,6 @@
+yt-dlp>=2023.12.30
+openai-whisper>=2023.12.30
+ollama>=0.1.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+
