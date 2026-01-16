@@ -3,4 +3,6 @@ openai-whisper>=2023.12.30
 ollama>=0.1.0
 python-dotenv>=1.0.0
 openai>=1.0.0
+flask>=3.0.0
+curl-cffi>=0.13,<0.14
 
