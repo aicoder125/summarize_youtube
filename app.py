@@ -175,6 +175,18 @@ MAIN_PAGE = '''
                     required>
             </div>
 
+            <label>Subtitle Language</label>
+            <div class="model-select">
+                <label class="model-option selected">
+                    <input type="radio" name="language" value="english" checked>
+                    <div>English</div>
+                </label>
+                <label class="model-option">
+                    <input type="radio" name="language" value="chinese">
+                    <div>Chinese (zh-Hans)</div>
+                </label>
+            </div>
+
             <label>Summarization Model</label>
             <div class="model-select">
                 <label class="model-option selected">
@@ -184,6 +196,13 @@ MAIN_PAGE = '''
                 <label class="model-option">
                     <input type="radio" name="model" value="openai">
                     <div>OpenAI API</div>
+                </label>
+            </div>
+
+            <div class="checkbox-group" style="margin-bottom: 24px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" name="transcribe" id="transcribe" style="width: 18px; height: 18px;">
+                    <span>Transcribe audio if no subtitles (uses Whisper, slower)</span>
                 </label>
             </div>
 
@@ -213,6 +232,8 @@ MAIN_PAGE = '''
 
             const url = document.getElementById('url').value;
             const model = document.querySelector('input[name="model"]:checked').value;
+            const language = document.querySelector('input[name="language"]:checked').value;
+            const transcribe = document.getElementById('transcribe').checked;
             const submitBtn = document.getElementById('submit-btn');
             const loading = document.getElementById('loading');
             const loadingText = document.getElementById('loading-text');
@@ -224,7 +245,13 @@ MAIN_PAGE = '''
             submitBtn.disabled = true;
 
             // Update loading text
-            const steps = [
+            const steps = transcribe ? [
+                'Downloading subtitles...',
+                'No subtitles found, downloading audio...',
+                'Transcribing audio with Whisper...',
+                'Generating summary with AI...',
+                'Almost done...'
+            ] : [
                 'Downloading subtitles...',
                 'Converting to text...',
                 'Generating summary with AI...',
@@ -240,7 +267,7 @@ MAIN_PAGE = '''
                 const response = await fetch('/summarize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url, model })
+                    body: JSON.stringify({ url, model, language, transcribe })
                 });
 
                 const data = await response.json();
@@ -415,18 +442,29 @@ def extract_video_id(video_input: str) -> str:
     return video_input
 
 
-def download_subtitles(video_id: str) -> str | None:
+def download_subtitles(video_id: str, use_chinese: bool = False) -> str | None:
     """Download subtitles using yt-dlp."""
-    strategies = [
-        ["yt-dlp", "--impersonate", "chrome", "--write-auto-subs", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
-        ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--write-auto-subs", "--sub-lang", "en", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
-        ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--sub-lang", "en-US", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
-    ]
+    if use_chinese:
+        # Chinese language strategies
+        strategies = [
+            ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--write-auto-subs", "--sub-lang", "zh-Hans", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+            ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--write-auto-subs", "--sub-lang", "zh-CN", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+            ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--write-auto-subs", "--sub-lang", "zh", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+            ["yt-dlp", "--impersonate", "chrome", "--write-auto-subs", "--sub-lang", "zh-Hans,zh-CN,zh", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+        ]
+        patterns = [f"{video_id}.zh-Hans.vtt", f"{video_id}.zh-CN.vtt", f"{video_id}.zh.vtt", f"{video_id}.zh-*.vtt", f"{video_id}.*.vtt"]
+    else:
+        # English language strategies
+        strategies = [
+            ["yt-dlp", "--impersonate", "chrome", "--write-auto-subs", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+            ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--write-auto-subs", "--sub-lang", "en", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+            ["yt-dlp", "--impersonate", "chrome", "--write-subs", "--sub-lang", "en-US", "--skip-download", "--ignore-errors", video_id, "-o", f"{video_id}.%(ext)s"],
+        ]
+        patterns = [f"{video_id}.en.vtt", f"{video_id}.en-US.vtt", f"{video_id}.en-en-US.vtt", f"{video_id}.*.vtt"]
 
     for cmd in strategies:
         subprocess.run(cmd, capture_output=True, text=True)
 
-        patterns = [f"{video_id}.en.vtt", f"{video_id}.en-US.vtt", f"{video_id}.en-en-US.vtt", f"{video_id}.*.vtt"]
         for pattern in patterns:
             matches = list(Path(".").glob(pattern))
             if matches:
@@ -445,13 +483,65 @@ def clean_vtt_to_text(vtt_path: str) -> str:
     for line in lines:
         line = re.sub(r'\d{2}:\d{2}:\d{2}.\d{3} --> \d{2}:\d{2}:\d{2}.\d{3}.*?\n', '', line)
         line = re.sub(r'<[^>]+>', '', line)
-        line = line.replace('WEBVTT', '').replace('Kind: captions', '').replace('Language: en', '')
+        line = line.replace('WEBVTT', '').replace('Kind: captions', '')
+        line = line.replace('Language: en', '').replace('Language: zh-Hans', '')
+        line = line.replace('Language: zh-CN', '').replace('Language: zh', '')
         line = line.strip()
         if line and line != last_line:
             clean_text.append(line)
             last_line = line
 
     return '\n'.join(clean_text)
+
+
+def download_audio(video_id: str) -> str | None:
+    """Download audio from YouTube video using yt-dlp."""
+    audio_file = f"{video_id}.mp3"
+
+    cmd = [
+        "yt-dlp",
+        "--impersonate", "chrome",
+        "-x",
+        "--audio-format", "mp3",
+        "--audio-quality", "0",
+        "-o", audio_file,
+        "--no-playlist",
+        video_id
+    ]
+
+    subprocess.run(cmd, capture_output=True, text=True)
+
+    if os.path.exists(audio_file):
+        return audio_file
+
+    for ext in ['.m4a', '.webm', '.opus', '.wav']:
+        alt_file = f"{video_id}{ext}"
+        if os.path.exists(alt_file):
+            return alt_file
+
+    return None
+
+
+def transcribe_audio(audio_path: str, language: str = "en") -> str | None:
+    """Transcribe audio using OpenAI Whisper."""
+    try:
+        import whisper
+
+        model_size = "medium" if language == "zh" else "base"
+        model = whisper.load_model(model_size)
+
+        result = model.transcribe(
+            audio_path,
+            language=language,
+            verbose=False
+        )
+
+        return result["text"].strip()
+
+    except ImportError:
+        return None
+    except Exception:
+        return None
 
 
 def get_video_metadata(video_id: str) -> dict:
@@ -512,6 +602,40 @@ def summarize_with_openai(text: str, model: str = "gpt-4o-mini") -> str:
     return response.choices[0].message.content
 
 
+def translate_to_chinese(text: str, use_openai: bool = False, model: str = None) -> str:
+    """
+    Translate text to Simplified Chinese using LLM.
+    Uses Qwen 2.5 (Ollama) by default - good for Chinese translation.
+    """
+    prompt = f"""Translate the following text to Simplified Chinese (简体中文).
+Output ONLY the Chinese translation, no explanations or original text.
+
+Text to translate:
+{text}"""
+
+    if use_openai:
+        from openai import OpenAI
+
+        model = model or "gpt-4o-mini"
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found")
+
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    else:
+        model = model or "qwen2.5:7b"
+        response = ollama.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response['message']['content']
+
+
 def format_summary_html(summary: str) -> str:
     """Convert summary text to HTML."""
     summary_html = ""
@@ -543,21 +667,68 @@ def summarize():
         data = request.json
         url = data.get('url', '').strip()
         model_type = data.get('model', 'ollama')
+        language = data.get('language', 'english')
+        use_chinese = language == 'chinese'
+        use_transcribe = data.get('transcribe', False)
+        use_openai = model_type == 'openai'
 
         if not url:
             return jsonify({'success': False, 'error': 'Please enter a YouTube URL'})
 
         video_id = extract_video_id(url)
 
-        # Download subtitles
-        vtt_file = download_subtitles(video_id)
-        if not vtt_file:
-            return jsonify({'success': False, 'error': 'Failed to download subtitles. The video may not have captions available.'})
+        # Track if we need to translate to Chinese
+        text = None
+        needs_translation = False
 
-        # Convert to text
-        text = clean_vtt_to_text(vtt_file)
+        if use_chinese:
+            # Step 1: Try Chinese subtitles first
+            vtt_file = download_subtitles(video_id, use_chinese=True)
+
+            if vtt_file:
+                text = clean_vtt_to_text(vtt_file)
+
+            # Step 2: Fallback to English subtitles + translation
+            if not text:
+                vtt_file = download_subtitles(video_id, use_chinese=False)
+
+                if vtt_file:
+                    text = clean_vtt_to_text(vtt_file)
+                    needs_translation = True
+
+            # Step 3: Fallback to audio transcription
+            if not text and use_transcribe:
+                audio_file = download_audio(video_id)
+                if audio_file:
+                    # Try Chinese transcription first
+                    text = transcribe_audio(audio_file, language="zh")
+                    if not text:
+                        # If Chinese transcription fails, try English and translate
+                        text = transcribe_audio(audio_file, language="en")
+                        if text:
+                            needs_translation = True
+        else:
+            # Original English flow
+            vtt_file = download_subtitles(video_id, use_chinese=False)
+
+            if vtt_file:
+                text = clean_vtt_to_text(vtt_file)
+
+            # If no subtitles, try transcription if enabled
+            if not text and use_transcribe:
+                audio_file = download_audio(video_id)
+                if audio_file:
+                    text = transcribe_audio(audio_file, language="en")
+
         if not text:
-            return jsonify({'success': False, 'error': 'Failed to extract text from subtitles'})
+            error_msg = 'Failed to download subtitles. The video may not have captions available.'
+            if not use_transcribe:
+                error_msg += ' Try enabling "Transcribe audio" option.'
+            return jsonify({'success': False, 'error': error_msg})
+
+        # Translate to Chinese if needed
+        if needs_translation and text:
+            text = translate_to_chinese(text, use_openai=use_openai)
 
         # Get metadata
         metadata = get_video_metadata(video_id)
